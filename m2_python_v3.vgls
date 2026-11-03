@@ -1,0 +1,316 @@
+%%%VERSION 2%%%
+#Options
+GenerateScanner = true
+GenerateParser = true
+Language = Python
+ScannerName = Lexico
+ParserName = Sintatico
+SemanticName = Semantico
+ScannerCaseSensitive = true
+ScannerTable = Full
+Input = String
+Parser = SLR
+#RegularDefinitions
+d:[0-9]
+l:[a-zA-Z]
+w:[\ \t\n\r]
+
+#Tokens
+//========== IDENTIFICADORES ==========
+id : ( {l} | _ ) ( {l} | {d} | _ )*
+
+//========== PALAVRAS RESERVADAS (casos especiais de id) ==========
+if     = id : "if"       // início de condicional
+then   = id : "then"     // separa condição do corpo do if
+else   = id : "else"     // ramo alternativo do condicional
+while  = id : "while"    // laço pré-testado
+do     = id : "do"       // usado no while (introduz corpo) e no do-while (introduz condição)
+return = id : "return"   // retorno de sub-rotina, com ou sem valor
+void   = id : "void"     // tipo de retorno para procedimentos (sem valor)
+int    = id : "int"      // tipo primitivo inteiro
+float  = id : "float"    // tipo primitivo ponto flutuante
+char   = id : "char"     // tipo primitivo caractere
+string = id : "string"   // tipo primitivo cadeia de caracteres
+bool   = id : "bool"     // tipo primitivo booleano
+true   = id : "true"     // literal booleano verdadeiro
+false  = id : "false"    // literal booleano falso
+for    = id : "for"      // laço pré-testado com variável de controle
+read   = id : "read"     // entrada de dados
+write  = id : "write"    // saída de dados
+function = id : "function" // define sub-rotina (procedimento ou funcao)
+var    = id : "var"      // inicia declaracao de variaveis/vetores
+
+//========== LITERAIS ==========
+lit_hex    : 0 [xX] [0-9A-Fa-f]+                                          // ex: 0xFF
+lit_bin    : 0 [bB] [01]+                                                 // ex: 0b101
+lit_real   : [0-9]+ "." [0-9]+                                            // ex: 3.14
+lit_int    : [0-9]+                                                       // ex: 42
+lit_char   : "'" ( [^ "'" \\ \n \r ] | \\ ( n | t | r | \\ | \" | "'" ) ) "'" // ex: 'a', '\n'
+lit_string : \" ( [^ \" \\ \n \r ] | \\ ( n | t | r | \\ | \" | "'" ) )* \"         // ex: "texto"
+
+//========== OPERADORES ARITMÉTICOS ==========
+plus   : "+"
+minus  : "-"    // usado como operador unário de negação (ex: -x)
+mult   : "*"
+divide : "/"
+modulo : "%"
+
+//========== OPERADORES RELACIONAIS ==========
+equal_to      : "=="
+not_equal     : "!="
+greater_equal : ">="
+less_equal    : "<="
+greater_than  : ">"
+less_than     : "<"
+
+//========== OPERADORES LÓGICOS ==========
+logical_and : "&&"
+logical_or  : "||"
+logical_not : "!"    //usado como operador unário (ex: !flag)
+
+//========== OPERADORES BIT A BIT ==========
+shift_left  : "<<"
+shift_right : ">>"
+bit_and     : "&"
+bit_or      : "|"
+bit_xor     : "^"
+bit_not     : "~"    // também usado como operador unário (ex: ~x)
+
+//========== ATRIBUIÇÃO ==========
+assign : "="
+
+//========== DELIMITADORES E PONTUADORES ==========
+semicolon : ";"   // termina declarações e comandos simples
+colon     : ":"   // separa nome e tipo na anotacao opcional
+comma     : ","   // separa itens em listas (parâmetros, argumentos, declaradores)
+lparen    : "("   // abre: condição, parâmetros, argumentos, sub-expressão
+rparen    : ")"
+lbracket  : "["   // abre índice de vetor
+rbracket  : "]"
+lbrace    : "{"   // abre bloco de comandos
+rbrace    : "}"
+
+//========== COMENTÁRIOS (tokens ANÔNIMOS: descartados pelo scanner) ==========
+: "/" "/" [^\n\r]*                                                        // // até fim da linha
+:! "/*" [^"*"]* "*"+ ( [^"*"/] [^"*"]* "*"+ )* "/"                        // /* ... */, não retrocedente (erro se não fechar)
+
+//========== IGNORAR ESPAÇOS EM BRANCO ==========
+: {w}+
+
+#NonTerminals
+<programa>
+<lista_itens>
+<item>
+<comando_global>
+<declaracao>
+<lista_declaradores>
+// Quatro alternativas explicitas em vez de <anotacao>
+<declarador>
+<nome>
+<tipo>
+<tipo_retorno>
+<subrotina>
+<parametros>
+<lista_parametros>
+<parametro>
+<nome_param>
+<bloco>
+<comandos>
+<comando>
+<referencia>
+<referencia_alvo>
+<atribuicao>
+<leitura>
+<lista_referencias>
+<escrita>
+<lista_saida>
+<chamada>
+<lista_argumentos>
+<retorno>
+<condicional>
+<laco>
+<exp>
+<exp1>
+<exp2>
+<exp3>
+<exp4>
+<exp5>
+<exp6>
+<exp7>
+<exp8>
+<exp9>
+<exp10>
+<op_rel>
+<op_neg>
+<op_bitwise>
+<op_arit_baixa>
+<op_arit_alta>
+#Grammar
+//===================================================================
+// ACOES SEMANTICAS (#N) -- ver GRAMATICA_ACOES.md para a tabela completa
+//   1-19 : tabela de simbolos, escopo, unicidade, avisos
+//   20-40: verificacao de tipos (pilha de tipos no Semantico)
+// Cada nivel binario de <exp> tem SEU numero de acao (26, 33..40): um
+// numero compartilhado juntaria os FOLLOW de todos os niveis e criaria
+// conflito empilha/reduz no SLR.
+//===================================================================
+
+//===================================================================
+// ESTRUTURA GERAL DO PROGRAMA  (sem main: o modulo e o programa)
+//===================================================================
+<programa> ::= <lista_itens> #19;
+
+<lista_itens> ::= <item> <lista_itens> | î;   // î = zero ou mais itens
+
+<item> ::= <subrotina>          // definicao com function
+         | <comando_global>;    // declaracao ou comando executavel no modulo
+
+// Nivel global aceita tudo que <comando> aceita, MENOS <retorno>
+// (return fora de sub-rotina e erro, como em Python).
+<comando_global> ::= <declaracao>
+                   | <atribuicao> semicolon
+                   | <leitura> semicolon
+                   | <escrita> semicolon
+                   | <chamada> semicolon
+                   | <condicional>
+                   | <laco>
+                   | <bloco>;
+
+//===================================================================
+// DECLARACOES DE VARIAVEIS E VETORES
+//===================================================================
+// var e obrigatorio. A anotacao de tipo e OPCIONAL e pos-fixada com :.
+// Sem tipo anotado, a variavel recebe o tipo do inicializador (#4) ou
+// da primeira atribuicao (#28).
+<declaracao> ::= var <lista_declaradores> semicolon;
+
+<lista_declaradores> ::= <declarador> comma <lista_declaradores> | <declarador>;
+
+// Quatro alternativas explicitas em vez de <anotacao> ::= colon <tipo> | î:
+// sem producao vazia, imune a surpresa de FOLLOW no SLR.
+<declarador> ::= <nome> #5
+               | <nome> colon <tipo> #3 #5
+               | <nome> assign <exp> #4
+               | <nome> colon <tipo> #3 assign <exp> #4;
+
+<nome> ::= id #1                                  // variavel simples
+         | id #1 lbracket lit_int rbracket #2;    // vetor, com tamanho fixo obrigatorio
+
+<tipo> ::= int | float | char | string | bool;
+
+<tipo_retorno> ::= <tipo> #3 | void #12;
+
+//===================================================================
+// SUB-ROTINAS (procedimentos e funcoes) -- palavra-chave function
+//===================================================================
+<subrotina> ::= function id #9 lparen <parametros> rparen #10 <bloco> #13
+              | function id #9 lparen <parametros> rparen colon <tipo_retorno> #11 <bloco> #13;
+
+<parametros> ::= <lista_parametros> | î;   // zero ou mais parametros
+
+<lista_parametros> ::= <parametro> comma <lista_parametros> | <parametro>;
+
+<parametro> ::= <nome_param> #8
+              | <nome_param> colon <tipo> #3 #8;
+
+<nome_param> ::= id #6                         // parametro por valor
+               | id #6 lbracket rbracket #7;   // parametro vetor (sem tamanho fixo)
+
+//===================================================================
+// BLOCOS E COMANDOS
+//===================================================================
+<bloco> ::= lbrace <comandos> rbrace;
+
+<comandos> ::= <comando> <comandos> | î;   // zero ou mais comandos
+
+<comando> ::= <declaracao>             // declaracao local (var ...), tipo opcional
+            | <atribuicao> semicolon
+            | <leitura> semicolon
+            | <escrita> semicolon
+            | <chamada> semicolon      // chamada usada como comando (procedimento)
+            | <retorno> semicolon
+            | <condicional>            // if/if-else terminam em bloco, nao em ;
+            | <laco>                   // idem
+            | <bloco>;                 // bloco aninhado dentro de outro bloco
+
+//===================================================================
+// REFERENCIA (rvalue -- usada dentro de expressoes): marca "usado"
+//===================================================================
+<referencia> ::= id #14
+               | id #15 lbracket <exp> rbracket #21;
+
+//===================================================================
+// REFERENCIA_ALVO (lvalue -- alvo de atribuicao ou leitura): marca "inicializado"
+//===================================================================
+<referencia_alvo> ::= id #16
+                    | id #17 lbracket <exp> rbracket #29;
+
+//===================================================================
+// ATRIBUICAO
+//===================================================================
+<atribuicao> ::= <referencia_alvo> assign <exp> #28;
+
+//===================================================================
+// ENTRADA E SAIDA
+//===================================================================
+<leitura> ::= read lparen <lista_referencias> rparen;
+
+<lista_referencias> ::= <referencia_alvo> comma <lista_referencias> | <referencia_alvo>;
+
+<escrita> ::= write lparen <lista_saida> rparen;
+
+<lista_saida> ::= <exp> #31 comma <lista_saida> | <exp> #31;   // variavel, vetor ou literal
+
+//===================================================================
+// CHAMADA DE SUB-ROTINA
+//===================================================================
+<chamada> ::= id #18 lparen <lista_argumentos> rparen #24;
+
+<lista_argumentos> ::= <exp> #22 comma <lista_argumentos> | <exp> #22 | î;
+
+//===================================================================
+// RETORNO
+//===================================================================
+<retorno> ::= return <exp> #32   // funcao: devolve um valor
+            | return;            // procedimento: apenas encerra a execucao
+
+//===================================================================
+// ESTRUTURAS DE CONTROLE -- condicao (#30) precisa ser bool
+//===================================================================
+// <bloco> obrigatorio nos ramos: elimina o conflito do dangling-else.
+<condicional> ::= if lparen <exp> #30 rparen then <bloco>
+                | if lparen <exp> #30 rparen then <bloco> else <bloco>;
+
+<laco> ::= while lparen <exp> #30 rparen do <comando>                                       // pre-testado
+         | for lparen <atribuicao> semicolon <exp> #30 semicolon <atribuicao> rparen <comando> // pre-testado c/ controle
+         | do <comando> while lparen <exp> #30 rparen semicolon;                            // pos-testado
+
+//===================================================================
+// EXPRESSOES -- precedencia do mais fraco (<exp>) ao mais forte (<exp10>)
+// #25 guarda o operador; a acao no fim de cada nivel confere os tipos.
+//===================================================================
+<exp>  ::= <exp> logical_or #25 <exp1> #26 | <exp1>;            // nivel 1 (mais fraco): ||
+<exp1> ::= <exp1> logical_and #25 <exp2> #33 | <exp2>;          // nivel 2: &&
+<exp2> ::= <exp2> bit_or #25 <exp3> #34 | <exp3>;               // nivel 3: |
+<exp3> ::= <exp3> bit_xor #25 <exp4> #35 | <exp4>;              // nivel 4: ^
+<exp4> ::= <exp4> bit_and #25 <exp5> #36 | <exp5>;              // nivel 5: &
+<exp5> ::= <exp5> <op_rel> #25 <exp6> #37 | <exp6>;             // nivel 6: relacionais
+<exp6> ::= <exp6> <op_bitwise> #25 <exp7> #38 | <exp7>;         // nivel 7: << >>
+<exp7> ::= <exp7> <op_arit_baixa> #25 <exp8> #39 | <exp8>;      // nivel 8: + -
+<exp8> ::= <exp8> <op_arit_alta> #25 <exp9> #40 | <exp9>;       // nivel 9: * / %
+<exp9> ::= <op_neg> #25 <exp9> #27 | <exp10>;                   // nivel 10: unario (- ! ~)
+
+<exp10> ::= lit_int #20 | lit_real #20 | lit_hex #20 | lit_bin #20 | lit_char #20 | lit_string #20
+          | true #20 | false #20
+          | <chamada> #23   // funcao usada como valor (ex: x = soma(1,2))
+          | <referencia>    // variavel ou vetor indexado
+          | lparen <exp> rparen;
+
+<op_rel>        ::= greater_than | less_than | greater_equal | less_equal | equal_to | not_equal;
+<op_neg>        ::= minus | bit_not | logical_not;
+<op_bitwise>    ::= shift_left | shift_right;
+<op_arit_baixa> ::= plus | minus;
+<op_arit_alta>  ::= mult | divide | modulo;
+
+#SimulatorText
+LyogVGVzdGUgZG8gYW5hbGlzYWRvciBzaW50YXRpY28gLSB2ZXJzYW8gUHl0aG9uLWxpa2UuCiAgIENvYnJlOiB2YXIgY29tIG11bHRpcGxvcyBpZHMsIGFub3RhY2FvIGRlIHRpcG8gb3BjaW9uYWwgcG9zLWZpeGFkYSwKICAgdmV0b3Jlcywgc3ViLXJvdGluYXMgY29tIGZ1bmN0aW9uLCBvcyAzIGxhY29zLCBjb25kaWNpb25hbCBzaW1wbGVzCiAgIGUgY29tcG9zdG8sIEUvUyBlIHRvZGEgYSBjYWRlaWEgZGUgb3BlcmFkb3Jlcy4gKi8KCnZhciBjb250YWRvcjogaW50ID0gMCwgbWVkaWEsIG51bWVyb3NbMTBdLCBhdGl2bzogYm9vbCA9IHRydWU7CnZhciBhID0gMSwgYiA9IDIsIGNbNV06IGZsb2F0LCBpOwoKZnVuY3Rpb24gc29tYSh4OiBpbnQsIHk6IGludCk6IGludCB7CiAgIHJldHVybiB4ICsgeTsKfQoKZnVuY3Rpb24gaW5pY2lhbGl6YSgpIHsgICAgICAgICAgICAgIC8vIHNlbSBwYXJhbWV0cm9zIGUgc2VtIHRpcG8gZGUgcmV0b3JubwogICBjb250YWRvciA9IDA7CiAgIHJldHVybjsKfQoKZnVuY3Rpb24gaW1wcmltZSh2W10sIG46IGludCk6IHZvaWQgewogICB2YXIgayA9IDA7ICAgICAgICAgICAgICAgICAgICAgICAgLy8gZGVjbGFyYWNhbyBsb2NhbCBzZW0gdGlwbwogICB3aGlsZSAoayA8IG4pIGRvIHsKICAgICAgd3JpdGUodltrXSk7CiAgICAgIGsgPSBrICsgMTsKICAgfQogICByZXR1cm47Cn0KCi8vLS0tLS0tLS0tLSBjb2RpZ28gZXhlY3V0YXZlbCBubyBuaXZlbCBkbyBtb2R1bG8gLS0tLS0tLS0tLQoKZ2xvYmFsX3NlbV90aXBvID0gNzsgICAgICAgICAgICAgICAgIC8vIHZhcmlhdmVsIG5hc2NlIG5hIGF0cmlidWljYW8Kd3JpdGUoImluaWNpYW5kbyIpOwppbmljaWFsaXphKCk7CnJlYWQobWVkaWEpOwpyZWFkKG51bWVyb3NbMF0sIG51bWVyb3NbMV0pOwoKaWYgKGNvbnRhZG9yID09IDApIHRoZW4geyAgICAgICAgICAgIC8vIGNvbmRpY2lvbmFsIHNpbXBsZXMKICAgd3JpdGUoInplcmFkbyIpOwp9CgppZiAobWVkaWEgPiAxMC4wICYmIGF0aXZvKSB0aGVuIHsgICAgLy8gY29uZGljaW9uYWwgY29tcG9zdG8KICAgd3JpdGUoImFsdG8iLCBtZWRpYSk7Cn0gZWxzZSB7CiAgIHdyaXRlKCJiYWl4byIpOwp9Cgpmb3IgKGkgPSAwOyBpIDwgMTA7IGkgPSBpICsgMSkgeyAgICAgLy8gcHJlLXRlc3RhZG8gY29tIHZhcmlhdmVsIGRlIGNvbnRyb2xlCiAgIG51bWVyb3NbaV0gPSBzb21hKGksIDEpICogMjsKfQoKZG8geyAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIC8vIHBvcy10ZXN0YWRvCiAgIGNvbnRhZG9yID0gY29udGFkb3IgKyAxOwp9IHdoaWxlIChjb250YWRvciA8IDMpOwoKbWVkaWEgPSAoc29tYShhLCBiKSArIG51bWVyb3NbMl0gKiAzIC0gfmEpIC8gMiAlIDc7CmF0aXZvID0gIShhID49IGIpIHx8IChhIDw8IDEpIF4gKGIgJiAzKSB8IDg7CgppbXByaW1lKG51bWVyb3MsIDEwKTsKd3JpdGUoImZpbSIsICd4JywgMHhGRiwgMGIxMDEwLCAzLjE0KTsK
